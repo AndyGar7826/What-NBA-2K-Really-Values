@@ -1,0 +1,267 @@
+---
+title: "What NBA 2K Really Values in Its Top Players"
+author: "Andy Garcia"
+format: html
+editor: visual
+---
+
+## Introduction:
+
+If you have ever played NBA 2K against a friend, you probably picked the Golden State Warriors just to use Stephen Curry and his 95 overall rating. His shooting stats are impressive, but most players do not think much beyond that. A 95 overall rating speaks for itself. It immediately signals elite performance, even to someone who is unfamiliar with the game.
+
+For more competitive players, every new game release sparks debate. Many fans argue that certain players did not receive the ratings they deserve and call it a robbery. I used to play NBA 2K competitively, but I often relied on YouTube builds because I never completely understood how the attribute system worked. There was no clear formula for what made a player great, and that mystery still exists today.
+
+In this project, I collected 2025 NBA 2K player from Kaggle and used unsupervised and supervised techniques to explore what NBA 2K really values. My goal was not just to predict overall ratings using a new supervised learning method called Support Vector Machines, but also to identify which current in-game attributes have the most influence on a player's overall rating.
+
+## Data Processing:
+
+I collected player data from Kaggle, which sourced the information directly from the 2K Ratings website. The dataset included a wide range of information such as salary, physical measurements, and hometown. For the purpose of this project, I only focused on current in-game attributes, since these are the factors that directly influence a player's overall rating in NBA 2K, according to the website.
+
+I excluded variables like height, weight, and wingspan because these traits are already captured through in-game stats. For example, rebounding and blocking reflect wingspan, where as strength reflects physical build. Including both physical traits and in-game attributes would have been redundant.
+
+To improve the clarity of visualizations in the next section, I created a label for each player using their first name and the initial of their last name.
+
+```{r}
+library(tidyverse)
+
+nba_data <- read_csv("current_nba_players.csv", show_col_types = FALSE)
+summary(nba_data)
+str(nba_data$overall)
+
+nba_clean <- nba_data |>
+  select(c(name, archetype, overall, agility, ball_handle, block, close_shot,
+           defensive_consistency, defensive_rebound, draw_foul, driving_dunk,
+           free_throw, hands, help_defense_iq, hustle, intangibles, 
+           interior_defense, layup, mid_range_shot, offensive_consistency, 
+           offensive_rebound, overall_durability, pass_accuracy, pass_iq, 
+           pass_perception, pass_vision, perimeter_defense, post_control, 
+           post_fade, post_hook, potential, shot_iq, speed, speed_with_ball,
+           stamina, standing_dunk, steal, strength, three_point_shot, vertical)) |>
+  mutate(label = paste(word(name, 1), paste0(substr(word(name, 2), 1, 1), ".")))
+```
+
+## Hierarchical Clustering:
+
+I used hierarchical clustering to group current NBA players based on how similar they are across in-game attributes. This unsupervised learning technique starts by treating each player as its own cluster and then repeatedly merges the most similar ones. The final product is a dendrogram, which is a tree diagram that shows how players connect at different levels of similarity.
+
+I excluded the overall rating and standardized all variables. This ensured that clustering was based entirely on in-game attributes, and that no single stat skewed the results. Player similarity was measured using the Euclidean distance.
+
+I applied hierarchical clustering to the top 50 NBA players and divided the dendrogram into eight clusters. Each cluster reflects a different player archetype. One cluster (in teal) grouped dominant big men like Nikola Jokic and Joel Embiid, who control the interior, score in the post, and pass out for scoring. Another cluster (in purple) included superstars like LeBron James, Kevin Durant, Anthony Edwards, and Jayson Tatum, who use their athleticism to dominate the paint while also scoring from the outside. A third cluster (in yellow-green) captured playmaking sharpshooters like Stephen Curry and Kyrie Irving. Interior defenders known for rebounding and shot blocking, such as Victor Wembanyama and Evan Mobley, formed another cluster (in green). Rising stars like LaMelo Ball and Cade Cunningham, who have high potential and well-rounded offensive skills, appeared in their own group (in orange). Paul George and Jrue Holiday, strong on both defense and the wing, made up another cluster (in pink). Jimmy Butler and Bam Adebayo grouped together (in magenta) as effective finishers and defenders. One final group (in blue) stood out, consisting only of Zion Williamson, whose absurd vertical rating (99) and strength for offensive plays made him completely different from the rest.
+
+I also experiented with different values of k, the number of clusters. With k = 4, the clusters reflected broader player categories such as point guards, slashers, bigs, and forwards. As I increased k, the clusters became more specific and began to reflect in-game archetypes like "inside-out paint beast" or "2-way stretch bigs." This level of granularity showed how hierarchical clustering can be useful in revealing patterns about general players roles and nuanced play styles.
+
+```{r}
+library(dendextend)
+
+top_50 <- nba_clean |>
+  arrange(desc(overall)) |>
+  slice(1:50)
+
+hc_nba_top_50 <- top_50 |>
+  select(-c(name, archetype, overall, label)) |>
+  scale() |>
+  dist() |>
+  hclust() |>
+  as.dendrogram() |>
+  color_branches(k = 8) |>
+  place_labels(top_50$label) |>
+  color_labels(k = 8)
+plot(hc_nba_top_50, main = "Eight Distinct Player Types Among Top 50 NBA Players") 
+
+top_50$cluster <- cutree(hc_nba_top_50, k = 8)
+
+cluster_summary <- top_50 |>
+  group_by(cluster) |>
+  summarise(across(where(is.numeric), mean, na.rm = TRUE), .groups = "drop") |>
+  mutate(across(-cluster, round, 2))
+print(cluster_summary)
+
+top_50 |>
+  select(name, archetype, overall, cluster) |>
+  arrange(cluster)
+
+hc_nba_top_50 <- top_50 |>
+  select(-c(name, archetype, overall, label)) |>
+  scale() |>
+  dist() |>
+  hclust() |>
+  as.dendrogram() |>
+  color_branches(k = 4) |>
+  place_labels(top_50$label) |>
+  color_labels(k = 4)
+plot(hc_nba_top_50, main = "Top 50 NBA Players Clustered into 4 Broad Categories")
+```
+
+## Principal Component Analysis (PCA):
+
+I used Principal Component Analysis (PCA) to reduce the number of variables and better understand how players differ. PCA is an unsupervised learning technique that creates new variables, called principal components, which are combinations of the original attributes. These components summarize the meaningful information in the data, and I can identify the main dimensions along which players separate from one another. The first two components from this analysis capture most of that variation, which allows me to interpret key themes.
+
+Before applying PCA, I standardized all variables to ensure that each attribute contributed equally to the analysis. The first two principal components explained 47.48% of the total variation. PC1 captured 27.91%, and PC2 captured 19.57%.
+
+PC1 distinguishes offensive roles. Players with low PC1 scores tend to be guards who excel in ball handling, speed, passing, and three-point shooting. Players with high PC1 scores perform well in standing dunks, post control, offensive rebounding, and other characteristics associated with big men who score inside the paint.
+
+PC2 captures physical play style. Players with low PC2 scores are often strong defenders who rank highly in rebounding, defensive consistency, and strength. These players are defensively effective through their physical presence. Players with high PC2 scores are faster and more agile, focusing more on movement and speed than strength to make plays.
+
+To summarize, PC1 helps us understand where a player tends to score, whether near the basket or along the perimeter. PC2 helps explain how a player operates, either through physical strength or through agility and quickness. Together, these components highlight key dimensions that distinguish player types in NBA 2K. By examining the variables that load heavily on each component, I can better identify traits that distinguish standout players from the rest.
+
+```{r}
+pca <- prcomp(nba_clean |> select(-c(name, archetype, label, overall)), scale = TRUE)
+summary(pca)
+pca$x[, "PC1"]
+pca$x[, "PC2"]
+sort(pca$rotation[, "PC1"], decreasing = FALSE)
+sort(pca$rotation[, "PC2"], decreasing = FALSE)
+```
+
+## PCA Biplot:
+
+I created a biplot to visualize how players score on the first two principal components and which attributes contribute most to those components. Each dot represents a player, colored by overall rating. The arrows show the top 15 most influential attributes, which I scaled and labeled to highlight their direction and strength. I limited the plot to the top 15 attributes to avoid clutter.
+
+The length and direction of each arrow matter. Attributes like standing dunk and offensive rebound point far to the right, which means they strongly increase a player's PC1 score. On the other hand, ball handle and speed with ball point left, which means they push a player's PC1 score down. Players on the right tend to be big men who score inside, whereas players on the left are usually guards who focus on speed and ball control.
+
+PC2 separates players based on their physical style. Attributes like strength and help defense IQ point downward, which means players with low PC2 scores are more physical and focus on defense. High PC2 scores reflect agility and speed.
+
+The angles between arrows also give useful information. Arrows that point in the same direction, such as strength and post control, are positively correlated. Arrows pointing in opposite directions are negatively correlated. The fact that we assess correlation between variables via the biplot is a cool feature.
+
+Overall, this plot helps illustrate the diversity of player types. It also shows that the game does not favor one specific skill set. There is no single path to achieving a high overall rating, so different combinations of attributes can lead to success depending on a player's role.
+
+```{r}
+pca_scores <- as.data.frame(pca$x)
+pca_scores <- pca_scores |>
+  mutate(overall = nba_clean$overall)
+
+library(ggrepel)
+prop_var <- pca$sdev^2 / sum(pca$sdev^2)
+
+scores <- as.data.frame(pca$x)
+scores$overall <- nba_clean$overall
+
+loadings <- as.data.frame(pca$rotation)
+loadings$varname <- rownames(loadings)
+
+top_loadings <- loadings |>
+  mutate(magnitude = sqrt(PC1^2 + PC2^2)) |>
+  slice_max(order_by = magnitude, n = 15)
+
+range(scores$PC1, na.rm = TRUE)
+range(scores$PC2, na.rm = TRUE)
+scale <- 20
+
+biplot <- ggplot(data = scores, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = overall), size = 2) +
+  geom_segment(data = top_loadings, aes(x = 0, y = 0, xend = PC1 * scale, yend = PC2 * scale),
+               arrow = arrow(length = unit(0.3, "cm"), type = "open", angle = 25),
+               color = "darkblue", size = 1) +
+  scale_x_continuous(limits = c(-8, 8),
+                     name = paste0("PC1 (", round(prop_var[1] * 100, 2), " %)"),
+                     sec.axis = sec_axis(~ . / scale, name = "Loadings on PC1")) +
+  scale_y_continuous(limits = c(-10, 8),
+                     name = paste0("PC2 (", round(prop_var[2] * 100, 2), " %)"),
+                     sec.axis = sec_axis(~ . / scale, name = "Loadings on PC2")) +
+  geom_label_repel(data = top_loadings,
+                   aes(label = varname, x = PC1 * scale, y = PC2 * scale),
+                   box.padding = 0.2, point.padding = 0.3,
+                   size = 3, color = "black",
+                   arrow = arrow(length = unit(0.3, "cm"), type = "closed", angle = 25),
+                   force = 4, max.overlaps = 100) +
+  theme_bw() +
+  theme(axis.title.x.top = element_text(color = "darkblue"),
+        axis.title.y.right = element_text(color = "darkblue"),
+        axis.text.x.top = element_text(color = "darkblue"),
+        axis.ticks.x.top = element_line(color = "darkblue"),
+        axis.text.y.right = element_text(color = "darkblue"),
+        axis.ticks.y.right = element_line(color = "darkblue"),
+        legend.position = "top") +
+  labs(title = "Biplot - PCA")
+biplot
+```
+
+## Support Vector Machine (SVM):
+
+Support Vector Machines (SVMs) can be used for both classification and regression tasks. In this project, I used Support Vector Regression (SVR) to predict a player's overall rating, which is a continuous outcome.
+
+SVR is a supervised learning technique that works slightly differently from traditional linear regression. Instead of minimizing all prediction errors equally, SVR introduces a margin of tolerance around the prediction surface. Predictions that fall within this margin are considered close enough and are not penalized. The model focuses only on minimizing the distance of points that fall outside the margin.
+
+To visualize how SVR works, imagine predicting a player's overall rating using just three-point shot and driving dunk. SVR fits a flat surface through the data, but allows for a margin or "tube" around that surface. Points that land inside the tube are treated as accurate enough. Points that land outside it are treated as errors, and the model tries to keep those distances as small as possible.
+
+In this project, I used SVR with a linear kernel, which assumes a linear relationship between all the attributes and the overall rating. Each attribute in the model receives a coefficient, which shows how much it contributes to the predicted rating. These coefficients can then be used to rank the importance of each attribute.
+
+I trained the model on 80% of the data and tested it on the remaining 20%. The model achieved a Root Mean Squared Error (RMSE) of about 1.61, which means that predicted ratings were within 1.6 points of the actual overalls, on average. The model also explained nearly 95 percent of the variation in ratings, which is expected because the attributes used in the model are the same ones NBA 2K claims it uses to produce overall ratings.
+
+Given that NBA 2K ratings typically range from 60 to 99, this small average errors reveals that my model performs extremely well. However, my goal is not just to predict ratings accurately. I want to understand which attributes matter most in determining a player's overall. This model allows me to investigate what individual variables contribute most to these predictions.
+
+```{r}
+library(e1071)
+library(caret)
+
+model_data <- nba_clean |>
+  select(-c(name, archetype, label))
+str(model_data$overall)
+
+set.seed(218)
+training_indices <- createDataPartition(model_data$overall, p = 0.8, list = FALSE)
+training_data <- model_data[training_indices, ]
+testing_data <- model_data[-training_indices, ]
+
+svme <- svm(overall ~., 
+            data = training_data,
+            kernel = "linear") 
+
+predictsvme <- predict(svme, select(testing_data, -overall))
+modelRMSE1 <- RMSE(testing_data$overall, predictsvme)
+modelRMSE1
+test_r2 <- cor(testing_data$overall, predictsvme)^2
+test_r2
+```
+
+After fitting the SVR model with a linear kernel, I extracted the model's coefficients to understand which attributes mattered most in predicting a player's overall rating. Since the linear kernel gives a direct relationship between each input and the output, the size of each coefficient tells us how much that attribute influences the final score. The larger the absolute values, the more weight a specific variable has in the prediction.
+
+I plotted the top 15 most important attributes. Potential had the highest importance. According to 2K Ratings, potential measures the maximum rating a player can reach based on how they are used in the game. This shows that the rating system cares not just about how a player performs now, but how much room they have to grow. This explains why younger players like Cade Cunningham and LaMelo Ball receive strong overalls even if their current stats are lower compared to other established players.
+
+Other top predictors included offensive consistency, help defense IQ, and draw foul. These traits reflect great performance on both offense and defense. Offensive consistency shows how reliably a player performs throughout the game, and help defense IQ reflects their ability to rotate and support teammates. Draw foul measures how often a player creates contact and forces defenders to make mistakes. These traits reveal that NBA 2K rewards players who are dependable and smart across the floor.
+
+Intangibles and mid-range shot are other interesting attributes that ranked highly. Intangibles include things like leadership, toughness, and clutch ability. Mid-range shot is not the flashiest trait, but it carries weight in the overall formula.
+
+Athleticism attributes, such as standing dunk, vertical, and speed, matter, but not to same extent as the others. This is surprising because it shows that although athleticism helps, the rating system values well-rounded skill sets, smart decision-making, and how consistently a player performs.
+
+Many of the top attributes are the ones fans might not expect. It is not about flashiness. NBA 2k cares more about growth potential, consistency, and basketball IQ.
+
+```{r}
+coefficients <- t(svme$coefs) %*% svme$SV
+importance <- abs(coefficients)
+importance <- importance / max(importance)
+importance_df <- data.frame(Variable = colnames(training_data)[colnames(training_data) != "overall"], Importance = as.numeric(importance))
+importance_df <- importance_df[order(importance_df$Importance, decreasing = TRUE), ]
+print(importance_df)
+
+top_n <- 15
+ggplot(importance_df[1:top_n, ], aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_col(fill = "darkblue") +
+  coord_flip() +
+  labs(
+    title = "Top Variable Importances from SVR (Linear Kernel)",
+    x = "Variable",
+    y = "Importance"
+  ) +
+  theme_minimal()
+```
+
+## Conclusion:
+
+So what does NBA 2k really value when it rates its top players? Using a combination of unsupervised and supervised techniques, I dissected the patterns behind player attributes and how they connect to overall ratings.
+
+Hierarchical clustering showed that players group naturally into different archetypes based on their skill sets. These clusters reflected styles many fans are familiar with, like sharpshooters, big men, two-way defenders, and rising stars, without using the overall rating as input. Principal Component Analysis helped reveal two key dimensions in how players differ, the first being where they score, and the second being how they play, either through strength or speed.
+
+Support Vector Regression allowed me to predict overall ratings with high accuracy, but most importantly, it helped identify which attributes matter most. Potential came out on top, which highlights how NBA 2K rewards future growth more than current ability. Other top variables pointed to consistency, decision-making, and versatility, traits that show up in every possession, not just in highlight reels on social media.
+
+That said, NBA 2K's overall rating formula seems to reflect more than just athleticism or box score stats. It values well-rounded players who can perform under pressure, contribute on both ends of the floor, and grow over time. That focus may not always align with what fans notice first, but it gives us a clearer picture of what the game developers perceive as greatness.
+
+## Works Cited:
+
+1.  “Classifying Data Using Support Vector Machines(SVMs) in R.” *GeeksforGeeks*, 00:23:56+00:00, https://www.geeksforgeeks.org/classifying-data-using-support-vector-machinessvms-in-r/.
+2.  *Find Open Datasets and Machine Learning Projects \| Kaggle*. https://www.kaggle.com/datasets. Accessed 19 May 2025.
+3.  *Hierarchical Clustering in R: Dendrograms with Hclust*. https://www.datacamp.com/tutorial/hierarchical-clustering-R. Accessed 19 May 2025.
+4.  *NBA 2K25 Attributes Definitions \| 2K Ratings*. https://www.2kratings.com/nba-2k-attributes-definitions. Accessed 19 May 2025.
+5.  *Principal Component Analysis (PCA) in R Tutorial*. https://www.datacamp.com/tutorial/pca-analysis-r. Accessed 19 May 2025.
+6.  *Support Vector Machines in R Tutorial*. https://www.datacamp.com/tutorial/support-vector-machines-r. Accessed 19 May 2025.
+7.  “Variable Importance for Support Vector Machine and Naive Bayes Classifiers in R.” *GeeksforGeeks*, 12:45:20+00:00, https://www.geeksforgeeks.org/variable-importance-for-support-vector-machine-and-naive-bayes-classifiers-in-r/.
